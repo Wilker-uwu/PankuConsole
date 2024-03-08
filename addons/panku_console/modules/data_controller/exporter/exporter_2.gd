@@ -1,84 +1,77 @@
-extends Control
-const BUTTON_PREFIX = "export_button_"
-const COMMENT_PREFIX = "export_comment_"
+class_name MenuSettingsList extends VBoxContainer
+## this file is a direct adaptation from PankuConsole hosted by Ark2000,
+## which is distributed under the MIT License, and with many sections changed.
+## the original code can be found at: https://github.com/Ark2000/PankuConsole/blob/master/addons/panku_console/modules/data_controller/exporter/exporter_2.gd
+
+##i rewrote a bunch after midnight, and now i'm afraid of running it.
+##will it work? will it break? will it be hours wasted for something that won't end up in the game?
+##why tf did i stay awake for this?
+##~wilker 
+
+const BUTTON_PREFIX = "button__"
+const COMMENT_PREFIX = "comment__"
+const READONLY_PREFIX = "readonly__"
 const TEXT_LABEL_MIN_X = 120
 
-@export var container:VBoxContainer
+enum SettingType {READONLY, BUTTON_FUNC, BUTTON_GROUP, COMMENT, INTEGER, FLOAT, RANGE, VECTOR2, BOOLEAN, STRING, COLOR, ENUM}
 
-var objects := []
-var rows_need_update:Array = []
-var row_objects:Array[Object] = []
+var obj: Object
 
-func _ready() -> void:
-	init()
+func _init(item_list: Object):
+	obj = item_list
 
-func create_rows_from_object(index:int):
-	var obj:Object = objects[index]
+	assert(obj and is_instance_valid(obj))
+
 	var row_types := []
 	var rows := []
 
-	if obj == null:
-		return
-
-
-	if !is_instance_valid(obj):
-		return
-
-	var script = obj.get_script()
-	if script == null:
-		return
-
-	var data = script.get_script_property_list()
+	var data = obj.get_property_list()
 	for d in data:
 		if d.name.begins_with("_"): continue
-		if d.name.begins_with("readonly"):
-			row_types.append("read_only")
-			rows.append(create_ui_row_read_only(d))
+		if d.name.begins_with(READONLY_PREFIX):
+			row_types.append(SettingType.READONLY)
+			var row = MenuSettingString.new(obj, d)
+			row.disabled = true
+			rows.append(row)
 			continue
 		if d.usage == (PROPERTY_USAGE_SCRIPT_VARIABLE | PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_STORAGE):
-			if d.name.begins_with(BUTTON_PREFIX) and d.type == TYPE_STRING:
-				row_types.append("func_button")
-				rows.append(create_ui_row_func_button(d, obj))
-			elif d.name.begins_with(COMMENT_PREFIX) and d.type == TYPE_STRING:
-				row_types.append("comment")
-				rows.append(create_ui_row_comment(obj.get(d.name)))
-			elif d.type == TYPE_INT and d.hint == PROPERTY_HINT_NONE:
-				row_types.append("int")
-				rows.append(create_ui_row_int(d))
-			elif d.type == TYPE_FLOAT and d.hint == PROPERTY_HINT_NONE:
-				row_types.append("float")
-				rows.append(create_ui_row_float(d))
-			elif d.type in [TYPE_FLOAT, TYPE_INT] and d.hint == PROPERTY_HINT_RANGE:
-				row_types.append("range_number")
-				rows.append(create_ui_row_range_number(d))
-			elif d.type == TYPE_VECTOR2:
-				row_types.append("vec2")
-				rows.append(create_ui_row_vec2(d))
-			elif d.type == TYPE_BOOL:
-				row_types.append("bool")
-				rows.append(create_ui_row_bool(d))
-			elif d.type == TYPE_STRING:
-				row_types.append("string")
-				rows.append(create_ui_row_string(d))
-			elif d.type == TYPE_COLOR:
-				row_types.append("color")
-				rows.append(create_ui_row_color(d))
-			elif d.type == TYPE_INT and d.hint == PROPERTY_HINT_ENUM:
-				row_types.append("enum")
-				rows.append(create_ui_row_enum(d))
-			else:
-				row_types.append("read_only")
-				rows.append(create_ui_row_read_only(d))
+			match d.type:
+				TYPE_STRING when d.name.begins_with(BUTTON_PREFIX):
+					row_types.append(SettingType.BUTTON_FUNC)
+					rows.append(MenuSettingButton.new(obj, d))
+				TYPE_STRING when d.name.begins_with(COMMENT_PREFIX):
+					row_types.append(SettingType.COMMENT)
+					rows.append(MenuSettingComment.new(obj, d))
+				TYPE_FLOAT,TYPE_INT when d.hint == PROPERTY_HINT_RANGE:
+					row_types.append(SettingType.RANGE)
+					rows.append(MenuSettingRange.new(obj, d))
+				TYPE_BOOL:
+					row_types.append(SettingType.BOOLEAN)
+					rows.append(MenuSettingBool.new(obj, d))
+				TYPE_STRING:
+					row_types.append(SettingType.STRING)
+					rows.append(MenuSettingString.new(obj, d))
+				TYPE_COLOR:
+					row_types.append(SettingType.COLOR)
+					rows.append(MenuSettingColor.new(obj, d))
+				TYPE_INT when d.hint == PROPERTY_HINT_ENUM:
+					row_types.append(SettingType.ENUM)
+					rows.append(MenuSettingEnum.new(obj, d))
+				_:
+					row_types.append(SettingType.READONLY)
+					var row = MenuSettingString.new(obj, d)
+					row.disabled = true
+					rows.append(row)
 		elif d.usage == PROPERTY_USAGE_GROUP:
-			row_types.append("group_button")
-			rows.append(create_ui_row_group_button(d, []))
+			row_types.append(SettingType.BUTTON_GROUP)
+			rows.append(MenuSettingGroup.new(d.name, []))
 
 	var current_group_button = null
 	var control_group = []
 	for i in range(rows.size()):
-		var row_type:String = row_types[i]
+		var row_type: SettingType = row_types[i]
 		var row = rows[i]
-		if row_type == "group_button":
+		if row_type == SettingType.BUTTON_GROUP:
 			if current_group_button != null:
 				current_group_button.control_group = control_group
 			control_group = []
@@ -86,122 +79,220 @@ func create_rows_from_object(index:int):
 		else:
 			if current_group_button != null:
 				control_group.append(row)
-		if not row_type in ["group_button", "func_button", "comment"]:
-			rows_need_update.append(row)
-			row_objects.append(obj)
 	if control_group.size() > 0:
 		current_group_button.control_group = control_group
 
 	for row in rows:
-		container.add_child(row)
+		add_child(row)
 
-func init():
-	for child in container.get_children():
-		container.remove_child(child)
-		child.queue_free()
-	
-	for i in range(objects.size()):
-		create_rows_from_object(i)
-
-	init_data()
-
-	create_tween().set_loops().tween_callback(update_rows).set_delay(0.1)
+	update_rows()
 
 func is_empty() -> bool:
-	return container.get_child_count() == 0
+	return get_child_count() == 0
 
 func update_rows():
-	for i in range(rows_need_update.size()):
-		var row = rows_need_update[i]
-		var obj = row_objects[i]
-		var prop_name = row.name_label.text
+	for row: MenuSettingRow in get_children():
+		if not row.visible: continue
+		row._downsync()
 
-		if !row.visible: continue
-		if row.is_active(): continue
+class MenuSettingRow extends HBoxContainer:
+	var label: Label = Label.new()
+	var control: Control
+	var object: Object
+	var property: Dictionary
+	
+	var disabled: bool: get = get_disabled, set = set_disabled
+	
+	signal setting_changed(value)
 
-		if is_instance_valid(obj):
-			row.update_ui(obj.get(prop_name))
-		else:
-			if row.name_label.text.begins_with("(missing)"):
-				continue
-			row.name_label.text = "(missing)" + row.name_label.text
-			row.name_label.modulate=Color("#ae5464")
+	func _init(obj: Object, prop: Dictionary):
+		name = &"MenuSettingRow_%s" % prop
+		object = obj
+		property = prop
+		label.name = prop.name
+		label.text = prop.name.capitalize()
+		label.custom_minimum_size.x = TEXT_LABEL_MIN_X
 
-func init_data():
-	for i in range(rows_need_update.size()):
-		var row = rows_need_update[i]
-		var obj = row_objects[i]
-		var prop_name = row.name_label.text
+	func _enter_tree():
+		add_child(label)
+		add_child(control)
+		control.size_flags_horizontal = Control.SIZE_EXPAND
 
-		row.ui_val_changed.connect(
-			func(val):
-				if !is_instance_valid(obj):
-					return
-				if prop_name in obj:
-					if obj.has_method("update_setting"):
-						obj.update_setting(prop_name, val)
-					else:
-						obj.set(prop_name, val)
+	func _exit_tree(): for n in get_children(): n.free()
+
+	func get_disabled() -> bool: return control.disabled
+	func set_disabled(b: bool) -> void: control.disabled = b
+	
+	## Sends property data back to the object
+	func _upsync(): assert(false, "This MenuSettingRow does not work with an usync implementation of its own. Use other node classes inheriting from MenuSettingRow instead.")
+	## Picks up data from the object to update
+	func _downsync(): assert(false, "This MenuSettingRow does not work with a downsync implementation of its own. Use other node classes inheriting from MenuSettingRow instead.")
+
+class MenuSettingBool extends MenuSettingRow:
+	func _init(obj: Object, prop: Dictionary):
+		super(obj, prop)
+		control = CheckBox.new()
+
+	func _ready():
+		control.toggled.connect(func(is_toggled_on):
+			control.text = "Enabled" if is_toggled_on else "Disabled"
+			setting_changed.emit(is_toggled_on)
 		)
 
-func init_ui_row(ui_row:Control, property:Dictionary) -> Control:
-	ui_row.name_label.text = property.name
-	ui_row.name_label.custom_minimum_size.x = TEXT_LABEL_MIN_X
-	return ui_row
+	func _upsync(): object[property.name] = control.button_pressed
+	func _downsync(): control.button_pressed = object[property.name]
 
-func create_ui_row_float(property:Dictionary) -> Control:
-	var ui_row = preload("./row_float.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+class MenuSettingColor extends MenuSettingRow:
+	func _init(obj: Object, prop: Dictionary):
+		super(obj, prop)
+		control = create_picker()
+	
+	func _ready():
+		control.color_changed.connect(func(color: Color):
+			setting_changed.emit(color)
+		)
+	
+	func _upsync(): object[property.name] = control.color
+	func _downsync(): control.color = object[property.name]
+	
+	func create_picker() -> ColorPickerButton:
+		var button = ColorPickerButton.new()
+		var picker = button.get_picker()
+		picker.can_add_swatches = false
+		picker.color_mode = ColorPicker.MODE_OKHSL
+		picker.picker_shape = ColorPicker.SHAPE_OKHSL_CIRCLE
+		picker.color_modes_visible = false
+		picker.presets_visible = false
+		picker.sliders_visible = false
+		return button
 
-func create_ui_row_int(property:Dictionary) -> Control:
-	var ui_row = preload("./row_int.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+class MenuSettingRange extends MenuSettingRow:
+	enum {SELECTION_NONE, SELECTION_ENUM, SELECTION_BOOL}
+	const properties = {
+		"or_greater": "allow_greater",
+		"or_less": "allow_lesser",
+		"exp": "exp_edit",
+	#	"radians",
+	#	"degrees",
+	#	"hide_slider"
+	}
 
-func create_ui_row_range_number(property:Dictionary) -> Control:
-	var ui_row = preload("./row_range_number.tscn").instantiate()
-	ui_row.setup(property.type, property.hint_string.split(",", false))
-	return init_ui_row(ui_row, property)
+	var _type := SELECTION_NONE
+	
+	func _init(obj: Object, prop: Dictionary):
+		assert(property.type == TYPE_BOOL or property.type == TYPE_FLOAT)
+		super(obj, prop)
+		control = HSlider.new()
 
-func create_ui_row_vec2(property:Dictionary) -> Control:
-	var ui_row = preload("./row_vec_2.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+		var hint = property.hint_string.split(",", false)
+		if hint.size() >= 2:
+			control.min_value = float(hint[0])
+			control.max_value = float(hint[1])
+		
+		for i in range(2, hint.size()):
+			if i == 2 and !(hint[2] in properties):
+				control.step = hint[2].to_float()
+				continue
+			if hint[i] in properties:
+				control.set(properties[hint[i]], true)
+		
+		#set default step if not specified
+		if hint.size() == 2:
+			match property.type:
+				TYPE_INT:
+					control.step = 1
+					control.rounded = true
+				TYPE_FLOAT:
+					control.step = (control.max_value - control.min_value) / 100.0
+	
+	func _ready():
+		control.value_changed.connect(func(val):
+			setting_changed.emit(val)
+		)
+	
+	func _upsync(): object[property.name] = control.value
+	func _downsync(): control.value = object[property.name]
 
-func create_ui_row_bool(property:Dictionary) -> Control:
-	var ui_row = preload("./row_bool.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+class MenuSettingString extends MenuSettingRow:
+	func _init(obj: Object, prop: Dictionary):
+		super(obj, prop)
+		control = TextEdit.new()
+	
+	func _ready():
+		control.text_changed.connect(func():
+			setting_changed.emit(control.text)
+		)
+	
+	func _upsync(): object[property.name] = control.text
+	func _downsync(): control.text = object[property.name]
 
-func create_ui_row_string(property:Dictionary) -> Control:
-	var ui_row = preload("./row_string.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+class MenuSettingEnum extends MenuSettingRow:
+	func _init(obj: Object, prop: Dictionary):
+		var options: PackedStringArray = property.hint_string.split(",", false)
+		assert(not options.is_empty(), "MenuSettingEnum requires at least one defined enum in its property flags.")
+		super(obj, prop)
+		control = OptionButton.new()
+		for option in options:
+			if option.begins_with("--"):
+				control.add_separator(option.trim_prefix("--"))
+			else:
+				control.add_item(option)
+	
+	func _ready():
+		control.item_selected.connect(func(index):
+			setting_changed.emit(index)
+		)
+	
+	func _upsync(): object[property.name] = control.get_selected_id()
+	func _downsync(): (control as OptionButton).select(object[property.name])
 
-func create_ui_row_color(property:Dictionary) -> Control:
-	var ui_row = preload("./row_color.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+class MenuSettingButton extends MenuSettingRow:
+	func _init(obj: Object, prop: Dictionary):
+		assert(obj.has_method(obj[property.name]), "Missing method implementation inside of object: %s.%s" % [property.name, obj[property.name]])
+		super(obj, prop)
+		label.text = property.name.trim_prefix(BUTTON_PREFIX).capitalize()
+		control = Button.new()
+		control.text = "Press"
+	
+	func _ready():
+		control.pressed.connect(object.call.bind(object[property.name]))
 
-func create_ui_row_enum(property:Dictionary) -> Control:
-	var ui_row = preload("./row_enum.tscn").instantiate()
-	ui_row.setup(property.hint_string.split(",", false))
-	return init_ui_row(ui_row, property)
+class MenuSettingComment extends MenuSettingRow:
+	func _init(obj: Object, prop: Dictionary):
+		super(obj, prop)
+		label.text = obj[property.name]
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		control.free()
 
-func create_ui_row_read_only(property:Dictionary) -> Control:
-	var ui_row = preload("./row_read_only.tscn").instantiate()
-	return init_ui_row(ui_row, property)
+class MenuSettingGroup extends MenuSettingRow:
+	const ICON = preload("res://assets/graphics/miscellaneous/icon.png")
+	var control_group: Array[Control]
+	var group_opened: bool: set = set_group_visibility
 
-func create_ui_row_comment(comment:String) -> Control:
-	var ui_row = preload("./row_comment.tscn").instantiate()
-	ui_row.label.text = comment
-	return ui_row
+	func _init(title: StringName, group: Array[Control]):
+		label.free()
+		control = Button.new()
+		control.icon = ICON
+		control.text = title
+		#control.flat = true
+		control.expand_icon = true
+		control.toggle_mode = true
+		control.theme_type_variation = "MenuSettingsGroup"
+		control_group = group
 
-func create_ui_row_func_button(property:Dictionary, object:Object) -> Control:
-	var ui_row:Button = preload("./row_button.tscn").instantiate()
-	ui_row.text = object.get(property.name)
-	var func_name:String = property.name.trim_prefix(BUTTON_PREFIX)
-	if func_name in object:
-		ui_row.pressed.connect(Callable(object, func_name))
-	return ui_row
+	func _ready():
+		control.toggled.connect(set_group_visibility)
+		set_group_visibility(false)
+		control.button_pressed = false
 
-func create_ui_row_group_button(property:Dictionary, group:Array) -> Control:
-	var ui_row:Button = preload("./row_group_button.tscn").instantiate()
-	ui_row.text = property.name
-	ui_row.control_group = group
-	return ui_row
+	func set_group_visibility(enabled:bool):
+		for node in control_group:
+			node.visible = enabled
+
+class Property:
+	var name: String
+	var a_class_name: StringName
+	var type: Variant.Type
+	var hint: PropertyHint
+	var hint_string: String
+	var usage: PropertyUsageFlags
